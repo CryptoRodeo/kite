@@ -1,4 +1,4 @@
-# Kite
+# Kite :kite:
 
 Kubernetes Issue Tracking Engine
 
