@@ -1,2 +1,3 @@
 node_modules
 packages/backend/dist
+configs/kube-config.yaml

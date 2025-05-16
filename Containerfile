@@ -37,11 +37,14 @@ RUN yarn install && \
 # Expose port
 EXPOSE 3000
 
+# Copy custom kubeconfig file
+COPY --chown=1001:1001 configs/kube-config.yaml /opt/app-root/src/configs/
 # Set environment variables to use at runtime
 ENV NODE_ENV=development
 ENV LOG_LEVEL=info
 ENV KUBECONFIG=/opt/app-root/src/.kube/config
-ENV DATABASE_URL="postgresql://postgres:postgres@db:5432/issuesdb"
+ENV KUBE_CONFIG_PATH=/opt/app-root/src/configs/kube-config.yaml
+ENV DATABASE_URL="postgresql://kite:postgres@db:5432/issuesdb"
 
 # Start the app with a script that waits for the db
 COPY --chown=1001:1001 entrypoint.sh /
