@@ -22,7 +22,7 @@ RUN yarn --version
 RUN mkdir -p opt/app-root/src/packages/backend
 
 # Copy package files
-COPY --chown=1001:1001 package.json yarn.lock ./ 
+COPY --chown=1001:1001 package.json yarn.lock ./
 COPY --chown=1001:1001 packages/backend/package.json ./packages/backend/
 COPY --chown=1001:1001 packages/backend/prisma ./packages/backend/prisma/
 
