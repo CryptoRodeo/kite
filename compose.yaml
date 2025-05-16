@@ -10,10 +10,10 @@ services:
       - "${PORT}:3000"
     volumes:
       # Mount the source code for live editing
-      - ./packages/backend/:/app/packages/backend
+      - ./packages/backend/:/opt/app-root/src/packages/backend
       # Don't mount node_modules (use the container's)
-      - /app/node_modules
-      - /app/packages/backend/node_modules
+      - /opt/app-root/src/node_modules
+      - /opt/app-root/src/packages/backend/node_modules
       # Mount kube config as read-only
       - ${HOME}/.kube:/opt/app-root/src/.kube:ro
       - ${HOME}/.minikube:/home/${USER}/.minikube:ro
@@ -24,10 +24,10 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 10s
-      timeout: 5s
+      interval: 20s
+      timeout: 10s
       retries: 5
-      start_period: 15s
+      start_period: 30s
 
   db:
     image: postgres:15

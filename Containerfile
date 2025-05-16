@@ -3,13 +3,13 @@ FROM registry.redhat.io/ubi9/nodejs-22:latest
 
 USER root
 
-RUN dnf install -y nc
+RUN dnf install -y nc postgresql
+
 # Set non-root user
 USER 1001
 
-# Set working directory
-WORKDIR /app
-
+# The working directory is already set to /opt/app-root/src in the base image
+# No need to set WORKDIR explicitly
 
 RUN node --version
 RUN npm install -g yarn
@@ -18,7 +18,7 @@ RUN yarn --version
 # We'll mount the source code from host, so we don't copy it here.
 # Instead, we prepare the container with the right environment.
 
-RUN mkdir -p packages/backend
+RUN mkdir -p opt/app-root/src/packages/backend
 
 # Copy package files
 COPY --chown=1001:1001 package.json yarn.lock ./ 
@@ -38,7 +38,7 @@ RUN yarn install && \
 EXPOSE 3000
 
 # Set environment variables to use at runtime
-ENV NODE_ENV=production
+ENV NODE_ENV=development
 ENV LOG_LEVEL=info
 ENV KUBECONFIG=/opt/app-root/src/.kube/config
 ENV DATABASE_URL="postgresql://postgres:postgres@db:5432/issuesdb"
@@ -47,4 +47,4 @@ ENV DATABASE_URL="postgresql://postgres:postgres@db:5432/issuesdb"
 COPY --chown=1001:1001 entrypoint.sh /
 RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["yarn", "dev:backend"]
+CMD ["yarn", "dev"]
