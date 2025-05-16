@@ -1,7 +1,6 @@
 services:
   app:
     env_file: .env
-    user: "${UID}:${GID}"
     build:
       context: .
       dockerfile: Containerfile
