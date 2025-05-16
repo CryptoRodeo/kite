@@ -22,7 +22,7 @@ if [ "$NODE_ENV" = "development" ]; then
   # Use psql directly to check if table has records
   # Hide any errors
   # If the command fails, just output "0"
-  RECORD_COUNT=$(PGPASSWORD=postgres psql -h db -U postgres -d issuesdb -t -c "SELECT COUNT(*) FROM \"Issue\";" 2>/dev/null || echo "0")
+  RECORD_COUNT=$(PGPASSWORD=postgres psql -h db -U kite -d issuesdb -t -c "SELECT COUNT(*) FROM \"Issue\";" 2>/dev/null || echo "0")
   # Take the record count we got, delete extra spaces from DB output
   RECORD_COUNT=$(echo $RECORD_COUNT | tr -d ' ')
 
@@ -37,4 +37,5 @@ fi
 
 # Start the application
 echo "Starting application..."
+# Run whatever is set for CMD in the Containerfile
 exec "$@"
