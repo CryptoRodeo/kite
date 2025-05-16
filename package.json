@@ -6,14 +6,14 @@
     "packages/backend"
   ],
   "scripts": {
-    "dev:backend": "cd packages/backend && npm run dev",
-    "build:backend": "cd packages/backend && npm run build",
+    "dev:backend": "cd packages/backend && yarn run dev",
+    "build:backend": "cd packages/backend && yarn run build",
     "build:cli": "cd packages/cli && make build && make install && make kubectl-plugin",
-    "test:backend": "cd packages/backend && npm test",
+    "test:backend": "cd packages/backend && yarn test",
     "test:cli": "cd packages/cli && go test ./...",
     "db:migrate": "cd packages/backend && npx prisma migrate deploy",
-    "db:seed": "cd packages/backend && npm run seed",
-    "start:all": "npm run build:cli && npm run build:backend && cd packages/backend && npm start",
+    "db:seed": "cd packages/backend && yarn run seed",
+    "start:all": "yarn run build:cli && yarn run build:backend && cd packages/backend && yarn start",
     "prepare": "husky install"
   },
   "devDependencies": {

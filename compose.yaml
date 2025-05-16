@@ -1,0 +1,50 @@
+services:
+  app:
+    user: "${UID}:${GID}"
+    build:
+      context: .
+      dockerfile: Containerfile
+      args:
+        - NODE_ENV=${NODE_ENV}
+    ports:
+      - "${PORT}:3000"
+    volumes:
+      # Mount the source code for live editing
+      - ./packages/backend/:/app/packages/backend
+      # Don't mount node_modules (use the container's)
+      - /app/node_modules
+      - /app/packages/backend/node_modules
+      # Mount kube config as read-only
+      - ${HOME}/.kube:/opt/app-root/src/.kube:ro
+      - ${HOME}/.minikube:/home/${USER}/.minikube:ro
+    depends_on:
+      db:
+        # Ensure the DB is ready before the app
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: issuesdb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:

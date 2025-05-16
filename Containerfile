@@ -1,0 +1,50 @@
+# Builder
+FROM registry.redhat.io/ubi9/nodejs-22:latest
+
+USER root
+
+RUN dnf install -y nc
+# Set non-root user
+USER 1001
+
+# Set working directory
+WORKDIR /app
+
+
+RUN node --version
+RUN npm install -g yarn
+RUN yarn --version
+
+# We'll mount the source code from host, so we don't copy it here.
+# Instead, we prepare the container with the right environment.
+
+RUN mkdir -p packages/backend
+
+# Copy package files
+COPY --chown=1001:1001 package.json yarn.lock ./ 
+COPY --chown=1001:1001 packages/backend/package.json ./packages/backend/
+COPY --chown=1001:1001 packages/backend/prisma ./packages/backend/prisma/
+
+# IMPORTANT: Copy the Prisma files before generating
+COPY packages/backend/prisma ./packages/backend/prisma/
+
+# Install dependencies
+# Generate Prisma client
+RUN yarn install && \
+  cd packages/backend && \
+  npx prisma generate
+
+# Expose port
+EXPOSE 3000
+
+# Set environment variables to use at runtime
+ENV NODE_ENV=production
+ENV LOG_LEVEL=info
+ENV KUBECONFIG=/opt/app-root/src/.kube/config
+ENV DATABASE_URL="postgresql://postgres:postgres@db:5432/issuesdb"
+
+# Start the app with a script that waits for the db
+COPY --chown=1001:1001 entrypoint.sh /
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["yarn", "dev:backend"]
