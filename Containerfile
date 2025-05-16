@@ -1,8 +1,9 @@
-# Builder
 FROM registry.redhat.io/ubi9/nodejs-22:latest
 
+# Set root user to install dependencies
 USER root
 
+# Install dev dependencies
 RUN dnf install -y nc postgresql
 
 # Set non-root user
@@ -39,6 +40,7 @@ EXPOSE 3000
 
 # Copy custom kubeconfig file
 COPY --chown=1001:1001 configs/kube-config.yaml /opt/app-root/src/configs/
+
 # Set environment variables to use at runtime
 ENV NODE_ENV=development
 ENV LOG_LEVEL=info
@@ -50,4 +52,5 @@ ENV DATABASE_URL="postgresql://kite:postgres@db:5432/issuesdb"
 COPY --chown=1001:1001 entrypoint.sh /
 RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
+# Run this after entrypoint script
 CMD ["yarn", "dev"]
