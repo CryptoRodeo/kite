@@ -49,7 +49,7 @@ ENV KUBE_CONFIG_PATH=/opt/app-root/src/configs/kube-config.yaml
 ENV DATABASE_URL="postgresql://kite:postgres@db:5432/issuesdb"
 
 # Start the app with a script that waits for the db
-COPY --chown=1001:1001 entrypoint.sh /
+COPY --chown=1001:1001 scripts/entrypoint.sh /
 RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
 # Run this after entrypoint script

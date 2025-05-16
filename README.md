@@ -65,8 +65,8 @@ Context "minikube" modified.
 ```
 Next, run this script to generate the `kube-config.yaml` file for the backend service:
 ```
-chmod +x generate-kubeconfig.sh
-./generate-kubeconfig.sh
+chmod +x scripts/generate-kubeconfig.sh
+./scripts/generate-kubeconfig.sh
 ```
 
 This is used to talk to the cluster, allowing the service to perform actions like limiting issues by namespaces.
