@@ -1,0 +1,24 @@
+{
+  "name": "kite",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/backend"
+  ],
+  "scripts": {
+    "dev:backend": "cd packages/backend && npm run dev",
+    "build:backend": "cd packages/backend && npm run build",
+    "build:cli": "cd packages/cli && make build && make install && make kubectl-plugin",
+    "test:backend": "cd packages/backend && npm test",
+    "test:cli": "cd packages/cli && go test ./...",
+    "db:migrate": "cd packages/backend && npx prisma migrate deploy",
+    "db:seed": "cd packages/backend && npm run seed",
+    "start:all": "npm run build:cli && npm run build:backend && cd packages/backend && npm start",
+    "prepare": "husky install"
+  },
+  "devDependencies": {
+    "husky": "^8.0.0",
+    "lint-staged": "^13.2.2"
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
+}
