@@ -16,7 +16,7 @@ echo "Running database migrations"
 npx prisma migrate deploy
 
 # Only seed in development mode
-if [ "$NODE_ENV" = "development" ]; then
+if [[ "$NODE_ENV" == "development" ]]; then
   echo "Checking if database needs seeding..."
 
   # Use psql directly to check if table has records
