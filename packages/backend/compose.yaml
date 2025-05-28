@@ -12,6 +12,9 @@ services:
       db:
         # Ensure the DB is ready before the app
         condition: service_healthy
+      migrator:
+        # Ensure migrator has ran
+        condition: service_completed_successfully
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:3000/health"]
@@ -19,6 +22,15 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
+
+  migrator:
+    env_file: .env.development
+    build:
+      context: .
+      dockerfile: init.Containerfile
+    depends_on:
+      db:
+        condition: service_healthy
 
   db:
     image: registry.redhat.io/rhel9/postgresql-15

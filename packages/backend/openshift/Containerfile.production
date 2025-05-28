@@ -1,0 +1,73 @@
+# Build stage - use go toolset
+FROM registry.redhat.io/rhel9/go-toolset@sha256:e0ad156b08e0b50ad509d79513e13e8a31f2812c66e9c48c98cea53420ec2bca AS builder
+
+# Metadata
+LABEL org.opencontainers.image.source="https://github.com/konflux-ci/kite" \
+      org.opencontainers.image.version="v1.0.0" \
+      maintainer="cue-team"
+
+# Root user to install dependencies
+USER root
+RUN dnf install -y git && dnf clean all
+
+WORKDIR /build
+
+COPY go.mod go.sum ./
+# Download dependencies to local cache
+RUN go mod download
+
+COPY . .
+
+# Build static binary with maximum optimization
+#
+# CGO_ENABLED=0: Turn off C-Go integration.
+# This allows the app to
+# - be a self-contained binary that doesn't need external C libraries
+# - work on any linux system
+# - be used in a small, portable container
+#
+# GOOS=linux: sets the target OS (Linux)
+#
+# -a: Force rebuilds all packages
+#
+# -ldflags: passes flags to the linker to make smaller binaries
+# -w: removing debugging information
+# -s: remove symbol table
+# -extldflags 'static': Tell the external linker to make a fully static binary -> no dependencies on shared libraries
+#
+# -tags: only use parts of the code that are labeled with these tags
+# netgo:
+# - use the Go implementation of networking (instead of the C-based one).
+# - helps create a static binary without relying on system libraries, making it smaller and portable.
+#
+# osusergo:
+# - use the pure Go version of user lookup (instead of the C-based one)
+# - helps create a static binary without relying on system libraries, making it smaller and portable.
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -a -ldflags="-w -s -extldflags '-static'" \
+    -tags netgo,osusergo \
+    -o server cmd/server/main.go
+
+# Runtime stage - absolute minimal RHEL
+FROM registry.redhat.io/ubi9/ubi-micro@sha256:955512628a9104d74f7b3b0a91db27a6bbecdd6a1975ce0f1b2658d3cd060b98
+
+WORKDIR /opt/app-root/src
+
+# Copy only what's needed
+COPY --from=builder /build/server .
+COPY --chmod=755 scripts/entrypoint.sh ./entrypoint.sh
+COPY --chown=1001:1001 configs/kube-config.yaml ./configs/
+
+RUN chmod +x entrypoint.sh && \
+    chown -R 1001:1001 /opt/app-root/src
+
+ENV TZ=UTC
+ENV PROJECT_ENV=production
+
+USER 1001
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl --fail --silent --max-time 5 http://localhost:3000/health || exit 1
+
+ENTRYPOINT ["./entrypoint.sh"]

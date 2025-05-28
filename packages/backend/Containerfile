@@ -18,9 +18,9 @@ COPY . .
 
 # Build with optimization flags to reduce binary size
 #
-# CGO_ENABLED=0 - Turn off C-Go integration. 
+# CGO_ENABLED=0 - Turn off C-Go integration.
 # This allows the app to
-# - be a self-contained binary that doesnt need external C libraries
+# - be a self-contained binary that doesn't need external C libraries
 # - work on any linux system
 # - be used in a small, portable container
 #
@@ -28,11 +28,8 @@ COPY . .
 #
 # -a Force rebuilds all packages
 #
-# -ldflags="-w -s" passesflags to the linker to make smaller binaries
-# -w = removing debugging information
-# -s = remove symbol table
-RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-w -s" -o server cmd/server/main.go
-RUN CGO_ENABLED=0 GOOS=linux go build -a -ldflags="-w -s" -o seeder cmd/seed/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -o server cmd/server/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -a -o seeder cmd/seed/main.go
 
 # Runtime stage - use minimal RHEL image
 FROM registry.redhat.io/ubi9/ubi-minimal
@@ -58,7 +55,7 @@ COPY migrations/ ./migrations/
 COPY scripts/entrypoint.sh .
 COPY --chown=1001:0 configs/kube-config.yaml /opt/app-root/src/configs/
 
-# Set permissions and timezone
+# Set permissions
 RUN chmod +x entrypoint.sh && \
     chown -R 1001:0 /opt/app-root/src
 

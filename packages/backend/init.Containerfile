@@ -1,0 +1,23 @@
+# The purpose of this container is to initialize the database.
+FROM registry.redhat.io/ubi9/ubi-minimal@sha256:92b1d5747a93608b6adb64dfd54515c3c5a360802db4706765ff3d8470df6290
+
+USER root
+
+RUN microdnf install -y nc && \
+    curl -sSf https://atlasgo.sh | sh && \
+    microdnf clean all && \
+    rm -rf /var/cache/yum
+
+WORKDIR /opt/app-root/src
+
+# Atlas config and migrations
+COPY --chown=1001:1001 atlas.hcl .
+COPY --chown=1001:1001 migrations/ ./migrations/
+
+# Entrypoint script
+COPY --chown=1001:1001 scripts/init.sh .
+RUN chmod +x init.sh
+
+USER 1001
+
+ENTRYPOINT [ "./init.sh" ]
