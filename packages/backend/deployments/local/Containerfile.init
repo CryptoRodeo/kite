@@ -3,7 +3,7 @@ FROM registry.redhat.io/ubi9/ubi-minimal@sha256:92b1d5747a93608b6adb64dfd54515c3
 
 USER root
 
-RUN microdnf install -y nc && \
+RUN microdnf install -y postgresql && \
     curl -sSf https://atlasgo.sh | sh && \
     microdnf clean all && \
     rm -rf /var/cache/yum
