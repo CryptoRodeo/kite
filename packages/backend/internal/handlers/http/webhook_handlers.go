@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/konflux-ci/kite/internal/config"
 	"github.com/konflux-ci/kite/internal/handlers/dto"
 	"github.com/konflux-ci/kite/internal/models"
 	"github.com/konflux-ci/kite/internal/services"
@@ -27,6 +28,7 @@ func NewWebhookHandler(issueService services.IssueServiceInterface, logger *logr
 type PipelineFailureRequest struct {
 	PipelineName  string `json:"pipelineName" binding:"required"`
 	Namespace     string `json:"namespace" binding:"required"`
+	Severity      string `json:"severity"`
 	FailureReason string `json:"failureReason" binding:"required"`
 	RunID         string `json:"runId"`
 	LogsURL       string `json:"logsUrl"`
@@ -49,15 +51,21 @@ func (h *WebhookHandler) PipelineFailure(c *gin.Context) {
 	// Format issue data
 	logsURL := req.LogsURL
 	if logsURL == "" {
-		// TODO - Update this to the actual cluster URL
-		// Can probably be configured in the config package and referenced here.
-		logsURL = fmt.Sprintf("https://konflux.dev/logs/pipelinerun/%s", req.RunID)
+		baseURL := config.GetEnvOrDefault("KITE_CLUSTER_URL", "https://konflux.dev")
+		logsEndpoint := config.GetEnvOrDefault("KITE_LOGS_ENDPOINT", "/logs/pipelineruns/")
+		logsURL = fmt.Sprintf("%s%s%s", baseURL, logsEndpoint, req.RunID)
+	}
+
+	severity := models.SeverityMajor
+	if req.Severity != "" {
+		severity = models.Severity(req.Severity)
 	}
 
 	issueData := dto.CreateIssueRequest{
 		Title:       fmt.Sprintf("Pipeline run failed: %s", req.PipelineName),
 		Description: fmt.Sprintf("The pipeline run %s failed with reason: %s", req.PipelineName, req.FailureReason),
-		Severity:    models.SeverityMajor, // TODO - check if we should make this configurable via the request.
+		Severity:    severity,
+		IssueType:   models.IssueTypePipeline,
 		Namespace:   req.Namespace,
 		Scope: dto.ScopeReqBody{
 			ResourceType:      "pipelinerun",
@@ -72,42 +80,15 @@ func (h *WebhookHandler) PipelineFailure(c *gin.Context) {
 		},
 	}
 
-	// Check for duplicates
-	duplicateResult, err := h.issueService.CheckForDuplicateIssue(c.Request.Context(), issueData)
+	// Create or update the issue
+	issue, err := h.issueService.CreateOrUpdateIssue(c, issueData)
 	if err != nil {
-		h.logger.WithError(err).Error("Failed to check for duplicate pipeline issues")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process webhook"})
+		h.logger.WithError(err).Error("Failed to create or update pipeline")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to process webhook: %v", err)})
 		return
 	}
 
-	var issue *models.Issue
-	// If an existing issue already exists, run an update
-	if duplicateResult.IsDuplicate && duplicateResult.ExistingIssue != nil {
-		// Update existing issue
-		updateReq := dto.UpdateIssueRequest{
-			Title:       &issueData.Title,
-			Description: &issueData.Description,
-			Severity:    &issueData.Severity,
-			IssueType:   &issueData.IssueType,
-			Links:       issueData.Links,
-		}
-		issue, err = h.issueService.UpdateIssue(c.Request.Context(), duplicateResult.ExistingIssue.ID, updateReq)
-		if err != nil {
-			h.logger.WithError(err).Error("Failed to update existing pipeline issue")
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process webhook"})
-			return
-		}
-		h.logger.WithField("issue_id", duplicateResult.ExistingIssue.ID).Info("Updated existing pipeline issue")
-	} else {
-		// Create new issue
-		issue, err = h.issueService.CreateIssue(c.Request.Context(), issueData)
-		if err != nil {
-			h.logger.WithError(err).Error("Failed to create pipeline issue: %w", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to process webhook"})
-			return
-		}
-		h.logger.WithField("issue_id", issue.ID).Info("Created new pipeline issue")
-	}
+	h.logger.WithField("issue_id", issue.ID).Info("Processed pipeline failure webhook")
 
 	c.JSON(http.StatusCreated, gin.H{
 		"status": "success",
@@ -127,6 +108,9 @@ func (h *WebhookHandler) PipelineSuccess(c *gin.Context) {
 	resolved, err := h.issueService.ResolveIssuesByScope(c.Request.Context(), "pipelinerun", req.PipelineName, req.Namespace)
 	if err != nil {
 		h.logger.WithError(err).Errorf("failed to resolve issues for pipeline run %s : %v", req.PipelineName, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("Failed to resolve issues for pipeline: %v", err),
+		})
 		return
 	}
 

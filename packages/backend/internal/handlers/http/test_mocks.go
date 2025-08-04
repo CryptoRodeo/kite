@@ -19,10 +19,12 @@ type MockIssueService struct {
 	deleteIssueError                  error
 	updateIssueResult                 *models.Issue
 	updateIssueError                  error
-	checkForDuplicateIssueResult      *repository.DuplicateCheckResult
+	checkForDuplicateIssueResult      *models.Issue
 	checkForDuplicateIssueResultError error
 	resolveIssuesByScopeResult        int64
 	resolveIssuesByScopeError         error
+	createOrUpdateIssueResult         *models.Issue
+	createOrUpdateIssueError          error
 }
 
 func (m *MockIssueService) FindIssues(ctx context.Context, filters repository.IssueQueryFilters) (*dto.IssueResponse, error) {
@@ -45,8 +47,12 @@ func (m *MockIssueService) DeleteIssue(ctx context.Context, id string) error {
 	return m.deleteIssueError
 }
 
-func (m *MockIssueService) CheckForDuplicateIssue(ctx context.Context, req dto.CreateIssueRequest) (*repository.DuplicateCheckResult, error) {
+func (m *MockIssueService) FindDuplicateIssue(ctx context.Context, req dto.CreateIssueRequest) (*models.Issue, error) {
 	return m.checkForDuplicateIssueResult, m.checkForDuplicateIssueResultError
+}
+
+func (m *MockIssueService) CreateOrUpdateIssue(ctx context.Context, req dto.CreateIssueRequest) (*models.Issue, error) {
+	return m.createOrUpdateIssueResult, m.checkForDuplicateIssueResultError
 }
 
 func (m *MockIssueService) ResolveIssuesByScope(ctx context.Context, resourceType, resourceName, namespace string) (int64, error) {
