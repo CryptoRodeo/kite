@@ -188,19 +188,15 @@ func TestIssueRepository_CheckDuplicate(t *testing.T) {
 	}
 
 	// Check for duplicates with the same properties
-	result, err := repo.CheckDuplicate(ctx, req)
+	foundIssue, err := repo.FindDuplicate(ctx, req)
 
 	// Verify
 	if err != nil {
 		t.Fatalf("Unexpected error, got %v", err)
 	}
 
-	if !result.IsDuplicate {
-		t.Error("Expected issue to be a duplicate")
-	}
-
-	if result.ExistingIssue == nil {
-		t.Error("Expected existing issue to be returned")
+	if foundIssue == nil {
+		t.Error("Expected duplicate issue to be returned")
 	}
 }
 
@@ -220,7 +216,7 @@ func TestIssueRepository_Update(t *testing.T) {
 	expectedTitle := "Updated Issue"
 
 	updatedIssueReq := dto.UpdateIssueRequest{
-		Title: &expectedTitle,
+		Title: expectedTitle,
 	}
 	// Update
 	updatedIssue, err := repo.Update(ctx, expectedID, updatedIssueReq)
