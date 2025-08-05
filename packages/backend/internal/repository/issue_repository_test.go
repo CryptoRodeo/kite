@@ -90,8 +90,9 @@ func TestIssueRepository_FindByID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error, got: %v", err)
 	}
+
 	if foundIssue == nil {
-		t.Fatalf("Expected issue to be found, got nil")
+		t.Fatal("Expected issue to be found, got nil")
 	}
 
 	// Verify
@@ -196,7 +197,7 @@ func TestIssueRepository_CheckDuplicate(t *testing.T) {
 	}
 
 	if foundIssue == nil {
-		t.Error("Expected duplicate issue to be returned")
+		t.Fatal("Expected duplicate issue to be returned")
 	}
 }
 

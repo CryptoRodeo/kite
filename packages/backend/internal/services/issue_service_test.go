@@ -346,7 +346,7 @@ func TestIssueService_CheckForDuplicates(t *testing.T) {
 	}
 
 	if foundIssue == nil {
-		t.Error("expected duplicate to be found")
+		t.Fatal("expected duplicate to be found")
 	}
 
 	if foundIssue.ID != issue.ID {
