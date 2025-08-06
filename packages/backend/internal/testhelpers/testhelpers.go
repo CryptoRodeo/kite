@@ -38,7 +38,9 @@ func SetupTestDB(t *testing.T) *gorm.DB {
 	t.Cleanup(func() {
 		sqlDB, err := db.DB()
 		if err == nil {
-			sqlDB.Close()
+			if err := sqlDB.Close(); err != nil {
+				t.Fatalf("Failed to close test database: %v")
+			}
 		}
 	})
 
@@ -110,7 +112,9 @@ func SetupConcurrentTestDB(t *testing.T) *gorm.DB {
 	t.Cleanup(func() {
 		sqlDB, _ := db.DB()
 		if sqlDB != nil {
-			sqlDB.Close()
+			if err := sqlDB.Close(); err != nil {
+				t.Fatalf("Failed to close test database: %v")
+			}
 		}
 	})
 
