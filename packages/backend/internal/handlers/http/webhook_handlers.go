@@ -13,8 +13,8 @@ import (
 )
 
 type WebhookHandler struct {
-	issueService services.IssueServiceInterface // IssueService instance
-	logger       *logrus.Logger                 // Logging Instance
+	issueService services.IssueServiceInterface // Issue service for managing issues
+	logger       *logrus.Logger                 // Logger for structured logging
 }
 
 // NewWebhookHandler returns a new handler for the webhooks route
@@ -26,12 +26,12 @@ func NewWebhookHandler(issueService services.IssueServiceInterface, logger *logr
 }
 
 type PipelineFailureRequest struct {
-	PipelineName  string `json:"pipelineName" binding:"required"`
-	Namespace     string `json:"namespace" binding:"required"`
-	Severity      string `json:"severity"`
-	FailureReason string `json:"failureReason" binding:"required"`
-	RunID         string `json:"runId"`
-	LogsURL       string `json:"logsUrl"`
+	PipelineName  string `json:"pipelineName" binding:"required"`  // Name of the failed pipeline
+	Namespace     string `json:"namespace" binding:"required"`     // Kubernetes namespace
+	Severity      string `json:"severity"`                         // Issue severity (optional, defaults to "major")
+	FailureReason string `json:"failureReason" binding:"required"` // Why the pipeline failed
+	RunID         string `json:"runId"`                            // Pipeline run identifier
+	LogsURL       string `json:"logsUrl"`                          // Direct URL to logs (optional)
 }
 
 type PipelineSuccessRequest struct {
@@ -39,7 +39,31 @@ type PipelineSuccessRequest struct {
 	Namespace    string `json:"namespace" binding:"required"`
 }
 
-// PipelineFailure handles pipeline failure webhooks
+// PipelineFailure handles pipeline failure webhooks with idempotent behavior.
+// Multiple identical webhook calls will result in a single issue being created
+// or updated, preventing duplicate issues in the system.
+//
+// Request Body:
+//   - pipelineName: Name of the failed pipeline (required)
+//   - namespace: Namespace where the pipeline ran (required)
+//   - failureReason: Description of why the pipeline failed (required)
+//   - severity: Issue severity (optional, defaults to "major")
+//   - runId: Pipeline run identifier for log URLs (optional)
+//   - logsUrl: Direct URL to logs (optional, can be auto-generated if not provided (work in progress))
+//
+// Response:
+//   - 201 Created: Issue was created or updated successfully
+//   - 400 Bad Request: Missing required fields
+//   - 500 Internal Server Error: Database or processing error
+//
+// Example:
+//
+//	POST /api/v1/webhooks/pipeline-failure
+//	{
+//	  "pipelineName": "frontend-build-xyz",
+//	  "namespace": "team-alpha",
+//	  "failureReason": "Docker build failed"
+//	}
 func (h *WebhookHandler) PipelineFailure(c *gin.Context) {
 	var req PipelineFailureRequest
 	// Check if the request binds to proper JSON, in the format specified
@@ -83,8 +107,8 @@ func (h *WebhookHandler) PipelineFailure(c *gin.Context) {
 	// Create or update the issue
 	issue, err := h.issueService.CreateOrUpdateIssue(c, issueData)
 	if err != nil {
-		h.logger.WithError(err).Error("Failed to create or update pipeline")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to process webhook: %v", err)})
+		h.logger.WithError(err).Error("Failed to create or update pipeline issue")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process webhook"})
 		return
 	}
 
@@ -96,7 +120,30 @@ func (h *WebhookHandler) PipelineFailure(c *gin.Context) {
 	})
 }
 
-// PipelineSuccess handles pipeline success webhooks
+// PipelineSuccess handles pipeline success webhooks.
+//
+// Request Body:
+//   - pipelineName: Name of the successful pipeline (required)
+//   - namespace: Namespace where the pipeline ran
+//
+// Response:
+//   - 200 OK: Issues related to the pipeline are resolved
+//   - 400 Bad Request: Missing required fields
+//   - 500 Internal Server Error: Database or processing error
+//
+// Issues that match the pipeline name and namespace will be marked as resolved using
+// the scope:
+//   - ResourceName: <pipeline name>
+//   - ResourceType: "pipelinerun"
+//   - ResourceNamespace: <pipeline namespace>
+//
+// Example:
+//
+//	  POST /api/v1/webhooks/pipeline-success
+//		 {
+//		   "pipelineName": "frontend-build",
+//		   "namespace": "team-alpha"
+//		 }
 func (h *WebhookHandler) PipelineSuccess(c *gin.Context) {
 	var req PipelineSuccessRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -109,7 +156,7 @@ func (h *WebhookHandler) PipelineSuccess(c *gin.Context) {
 	if err != nil {
 		h.logger.WithError(err).Errorf("failed to resolve issues for pipeline run %s : %v", req.PipelineName, err)
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": fmt.Sprintf("Failed to resolve issues for pipeline: %v", err),
+			"error": "Failed to resolve pipeline issues",
 		})
 		return
 	}
