@@ -18,6 +18,13 @@ type issueRepository struct {
 }
 
 // NewIssueRepository creates a new Issue repository
+//
+// Parameters:
+//   - db: Pointer to a database (gorm.DB)
+//   - logger: Pointer to a logger (logrus.Logger)
+//
+// Returns:
+//   - IssueRepository
 func NewIssueRepository(db *gorm.DB, logger *logrus.Logger) IssueRepository {
 	return &issueRepository{
 		db:     db,
@@ -25,6 +32,26 @@ func NewIssueRepository(db *gorm.DB, logger *logrus.Logger) IssueRepository {
 	}
 }
 
+// CreateOrUpdate atomically creates a new issue or updates an existing duplicate.
+// This method ensures that concurrent requests for the same issue will not create
+// duplicates by using database-level locking within a single transaction.
+//
+// Behavior:
+//   - If no duplicate exists: Creates a new issue with all provided data
+//   - If duplicate exists: Updates the existing issue with new information
+//     (preserves the original issue ID and creation time)
+//
+// Thread Safety:
+//   - This method is safe for concurrent use. Multiple goroutines/requests can call
+//     this simultaneously without creating duplicate issues.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeouts
+//   - req: The issue data to create or update
+//
+// Returns:
+//   - *models.Issue: The created or updated issue with all associations loaded
+//   - error: Database error, validation failure or nil
 func (i *issueRepository) CreateOrUpdate(ctx context.Context, req dto.IssuePayload) (*models.Issue, error) {
 	var issue *models.Issue
 	var isUpdate bool
@@ -68,7 +95,17 @@ func (i *issueRepository) CreateOrUpdate(ctx context.Context, req dto.IssuePaylo
 	return i.FindByID(ctx, issue.ID)
 }
 
-// Checks if an issue that matches the request data already exists.
+// FindDuplicate uses the request payload for an issue to check if an issue matching
+// that payload already exists.
+//
+// Parameters:
+//   - ctx: Context for cancellation and timeouts
+//   - req: The issue payload data used to check for duplicates
+//
+// Returns:
+//
+//   - *models.Issue: The existing issue if found, nil if no duplicates are found.
+//   - error: Database error or nil
 func (i *issueRepository) FindDuplicate(ctx context.Context, req dto.IssuePayload) (*models.Issue, error) {
 	var issue *models.Issue
 	err := i.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -96,12 +133,35 @@ func (i *issueRepository) FindDuplicate(ctx context.Context, req dto.IssuePayloa
 	return issue, nil
 }
 
-// Private duplicate check implementation
+// findDuplicateInTx checks for duplicate issues within a database transaction.
+// It uses the FOR UPDATE row-level locking to prevent race conditions
+// where multiple concurrent requests might create duplicate issues.
+//
+// The function considers an issue a duplicate if ALL of the following match:
+//   - Same namespace
+//   - Same issue type
+//   - Issue is in ACTIVE state
+//   - Same resource scope (type, name, namespace)
+//
+// Parameters:
+//   - tx: The database transaction to execute within
+//   - req: The issue payload containing the criteria to match.
+//
+// Returns:
+//   - *models.Issue: The existing issue if found, nil if no duplicate exists
+//   - error: Database errors (returns nil for "not found")
+//
+// Note:
+//   - The function MUST be called within a transaction to ensure the
+//     FOR UPDATE lock is properly held until the transaction commits.
+//   - Ensure your database is using at least READ COMMITTED isolation
+//     level (PostgreSQL default) to prevent phantom reads. Lower isolation levels
+//     may still allow race conditions.
 func (i *issueRepository) findDuplicateInTx(tx *gorm.DB, req dto.IssuePayload) (*models.Issue, error) {
 	var existingIssue models.Issue
 	// Try to find an existing issue matching these values.
-	// Do it all in the same DB transaction and use "FOR UPDATE"
-	// to lock the rows and prevent potential race conditions.
+	// Lock any matching rows with "FOR UPDATE" to prevent other transactions
+	// from reading or modifying them until the transaction completes.
 	// Doc: https://www.postgresql.org/docs/current/explicit-locking.html#LOCKING-ROWS
 	err := tx.Preload("Links").
 		Joins("JOIN issue_scopes on issues.scope_id = issue_scopes.id").
@@ -113,12 +173,12 @@ func (i *issueRepository) findDuplicateInTx(tx *gorm.DB, req dto.IssuePayload) (
 		First(&existingIssue).Error
 
 	if err != nil {
-		// Check if the error is no record was found.
-		// If it is, the issue is not a duplicate.
+		// Not finding a record is expected behavior (no duplicate exists)
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
 		}
 
+		// Actual database errors should be propagated.
 		return nil, fmt.Errorf("failed to check for duplicates: %w", err)
 	}
 	return &existingIssue, nil
@@ -136,6 +196,16 @@ type IssueQueryFilters struct {
 	Offset       int
 }
 
+// FindAll finds any issues matching the query filters passed.
+//
+// Parameters:
+//   - ctx: Context for cancellations and timeouts
+//   - filters: IssueQueryFilters used for querying and filtering
+//
+// Returns:
+//   - []models.Issue: All issues found that match the filter query
+//   - int64: The number of issues found
+//   - error: Database error or nil
 func (i *issueRepository) FindAll(ctx context.Context, filters IssueQueryFilters) ([]models.Issue, int64, error) {
 	var issues []models.Issue
 	var total int64
@@ -199,6 +269,15 @@ func (i *issueRepository) FindAll(ctx context.Context, filters IssueQueryFilters
 	return issues, total, nil
 }
 
+// FindByID finds an issue using its ID.
+//
+// Parameters:
+//   - ctx: Context for cancellations and timeouts
+//   - id: The ID of the issue to be found
+//
+// Returns:
+//   - *models.Issue: The issue if found, nil if not
+//   - error: Database error or nil
 func (i *issueRepository) FindByID(ctx context.Context, id string) (*models.Issue, error) {
 	var issue models.Issue
 
@@ -221,7 +300,20 @@ func (i *issueRepository) FindByID(ctx context.Context, id string) (*models.Issu
 	return &issue, nil
 }
 
-// Creates an Issue record
+// Create creates an Issue record and automatically updates an existing duplicate.
+// if one is found instead of creating a new issue.
+//
+// Note:
+// - This method uses the same duplicate-prevention logic as CreateOrUpdate.
+// - Unless the initial intent is to create a new issue, use CreateOrUpdate instead.
+//
+// Parameters:
+//   - ctx: Context for cancellations and timeouts
+//   - req: The issue payload containing the criteria to match.
+//
+// Returns:
+//   - *models.Issue: The created issue
+//   - error: Database error or nil
 func (i *issueRepository) Create(ctx context.Context, req dto.IssuePayload) (*models.Issue, error) {
 	var issue *models.Issue
 	// check for duplicates before creating.
@@ -270,7 +362,15 @@ func (i *issueRepository) Create(ctx context.Context, req dto.IssuePayload) (*mo
 	return i.FindByID(ctx, issue.ID)
 }
 
-// Private implementation for creating issues in a Database transaction
+// createNewIssueInTx creates an issue within a database transaction.
+//
+// Parameters:
+//   - tx: The database transaction to execute within
+//   - req: The issue payload for creating the issue
+//
+// Returns:
+//   - *models.Issue: The created issue, nil if not created
+//   - error: Database error or nil
 func (i *issueRepository) createNewIssueInTx(tx *gorm.DB, req dto.IssuePayload) (*models.Issue, error) {
 	now := time.Now()
 	state := req.GetState()
@@ -313,7 +413,16 @@ func (i *issueRepository) createNewIssueInTx(tx *gorm.DB, req dto.IssuePayload) 
 	return newIssue, nil
 }
 
-// Updates an existing issue record
+// Update performs an update operation on an existing issue record.
+//
+// Parameters:
+//   - ctx: Context for cancellations and timeouts
+//   - id: ID of the issue
+//   - req: Payload containing update data
+//
+// Returns:
+//   - *models.Issue: The updated issue or nil
+//   - error: Database error or nil
 func (i *issueRepository) Update(ctx context.Context, id string, req dto.IssuePayload) (*models.Issue, error) {
 	// Find existing issue
 	existingIssue, err := i.FindByID(ctx, id)
@@ -338,7 +447,15 @@ func (i *issueRepository) Update(ctx context.Context, id string, req dto.IssuePa
 	return i.FindByID(ctx, id)
 }
 
-// Private implementation for updating issues in a Database transaction
+// updateIssueInTx updates an issue within a database transaction.
+//
+// Parameters:
+//   - tx: The database transaction to execute within
+//   - existingIssue: The issue that will be updated
+//   - req: The update payload
+//
+// Returns:
+//   - error: Database error or nil
 func (i *issueRepository) updateIssueInTx(tx *gorm.DB, existingIssue *models.Issue, req dto.IssuePayload) error {
 	// Prepare updates
 	updates := map[string]any{
@@ -374,12 +491,11 @@ func (i *issueRepository) updateIssueInTx(tx *gorm.DB, existingIssue *models.Iss
 	}
 
 	if scope := req.GetScope(); scope.ResourceNamespace != "" {
-		err := tx.Model(&models.IssueScope{}).
-			Where("id = ?", existingIssue.ScopeID).
-			Updates(scope).Error
+		err := i.updateIssueScopeInTx(tx, existingIssue.ScopeID, scope)
 
 		if err != nil {
-			return fmt.Errorf("failed to update issue scope")
+			i.logger.WithField("scopeID", existingIssue.ScopeID).Error("failed to update issue scope")
+			return err
 		}
 		i.logger.WithField("issue_id", existingIssue.ID).Info("Updated scope")
 	}
@@ -387,6 +503,15 @@ func (i *issueRepository) updateIssueInTx(tx *gorm.DB, existingIssue *models.Iss
 	return nil
 }
 
+// replaceIssueLinks updates the links for an issue within a database transaction.
+//
+// Parameters:
+//   - tx: The database transaction to execute within
+//   - issueID: The ID of the issue
+//   - []dto.CreateLinkRequest: Payload for issue-related links
+//
+// Returns:
+//   - error: Database error or nil
 func (i *issueRepository) replaceIssueLinks(tx *gorm.DB, issueID string, links []dto.CreateLinkRequest) error {
 	// Delete old links
 	if err := tx.Where("issue_id = ?", issueID).Delete(&models.Link{}).Error; err != nil {
@@ -407,6 +532,33 @@ func (i *issueRepository) replaceIssueLinks(tx *gorm.DB, issueID string, links [
 	return nil
 }
 
+// updateIssueScopeInTx updates the scope for an issue within a database transaction
+//
+// Parameters:
+//   - tx: The database transaction to execute within
+//   - scopeID: The ID of the scope
+//   - req: The payload with update data
+//
+// Returns:
+//   - error: Database error or nil
+func (i *issueRepository) updateIssueScopeInTx(tx *gorm.DB, scopeID string, req dto.ScopeReqBody) error {
+	err := tx.Model(&models.IssueScope{}).
+		Where("id = ?", scopeID).
+		Updates(req).Error
+	if err != nil {
+		return fmt.Errorf("failed to update issue scope")
+	}
+	return nil
+}
+
+// Delete will delete an issue record.
+//
+// Parameters:
+//   - ctx: Context for cancellations and timeouts
+//   - id: ID of the issue
+//
+// Returns:
+//   - error: Database error or nil
 func (i *issueRepository) Delete(ctx context.Context, id string) error {
 	// Find the issue to get scope ID
 	issue, err := i.FindByID(ctx, id)
@@ -451,6 +603,23 @@ func (i *issueRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// ResolveByScope will find an issue found using the specified scope and update
+// that issue's state as resolved.
+//
+// The issue is found using it's scope's:
+//   - resourceType: PipelineRun, Component, Application, etc.
+//   - resourceName: The name of that resource (pipeline-xyz-123)
+//   - namespace: The namespace where that resource lives.
+//
+// Parameters:
+//   - ctx: Context for cancellations and timeouts
+//   - resourceType: The type of resource
+//   - resourceName: The name of that resource
+//   - namespace: The namespace of that resource
+//
+// Returns:
+//   - int64: The number of issues resolved in that scope
+//   - error: Database errors or nil
 func (i *issueRepository) ResolveByScope(ctx context.Context, resourceType, resourceName, namespace string) (int64, error) {
 	now := time.Now()
 
@@ -504,7 +673,15 @@ func (i *issueRepository) ResolveByScope(ctx context.Context, resourceType, reso
 	return count, nil
 }
 
-// AddRelatedIsue creates a relationship between two issues
+// AddRelatedIssue creates a relationship between two issues by creating a RelatedIssue record.
+//
+// Parameters:
+//   - ctx: Context for cancellations and timeouts
+//   - sourceID: The parent issue
+//   - targetID: The child issue
+//
+// Returns:
+//   - error: Database error or nil
 func (i *issueRepository) AddRelatedIssue(ctx context.Context, sourceID, targetID string) error {
 	// Check if both issues exist
 	source, err := i.FindByID(ctx, sourceID)
@@ -550,7 +727,15 @@ func (i *issueRepository) AddRelatedIssue(ctx context.Context, sourceID, targetI
 	return nil
 }
 
-// RemoveRelatedIssue removes a relationship between issues
+// RemoveRelatedIssue removes a relationship between the specified issues.
+//
+// Parameters:
+//   - ctx: Context for cancellations and timeouts
+//   - sourceID: The parent issue
+//   - targetID: The child issue
+//
+// Returns:
+//   - error: Database error or nil
 func (i *issueRepository) RemoveRelatedIssue(ctx context.Context, sourceID, targetID string) error {
 	result := i.db.WithContext(ctx).Where("(source_id = ? AND target_id = ?) OR (source_id = ? AND target_id = ?)",
 		sourceID, targetID, targetID, sourceID).Delete(&models.RelatedIssue{})
