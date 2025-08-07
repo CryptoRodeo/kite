@@ -168,7 +168,7 @@ func (i *issueRepository) findDuplicateInTx(tx *gorm.DB, req dto.IssuePayload) (
 		Where("issues.namespace = ? AND issues.issue_type = ? AND issues.state = ?",
 			req.GetNamespace(), req.GetIssueType(), models.IssueStateActive).
 		Where("issue_scopes.resource_type = ? AND issue_scopes.resource_name = ? AND issue_scopes.resource_namespace = ?",
-			req.GetScope().ResourceType, req.GetScope().ResourceName, req.GetNamespace()).
+			req.GetScope().GetResourceType(), req.GetScope().GetResourceName(), req.GetNamespace()).
 		Set("gorm:query_option", "FOR UPDATE").
 		First(&existingIssue).Error
 
@@ -316,6 +316,8 @@ func (i *issueRepository) FindByID(ctx context.Context, id string) (*models.Issu
 //   - error: Database error or nil
 func (i *issueRepository) Create(ctx context.Context, req dto.IssuePayload) (*models.Issue, error) {
 	var issue *models.Issue
+	// Check if the issue is being updated.
+	updatedIssue := false
 	// check for duplicates before creating.
 	err := i.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		existingIssue, err := i.findDuplicateInTx(tx, req)
@@ -324,13 +326,14 @@ func (i *issueRepository) Create(ctx context.Context, req dto.IssuePayload) (*mo
 		}
 
 		if existingIssue != nil {
+			updatedIssue = true
 			// Update existing issue instead of creating a new one
 			updateReq := dto.UpdateIssueRequest{
 				Title:       req.GetTitle(),
 				Description: req.GetDescription(),
 				Severity:    req.GetSeverity(),
 				IssueType:   req.GetIssueType(),
-				Scope:       req.GetScope(),
+				Scope:       req.GetScope().AsOptional(),
 				Namespace:   req.GetNamespace(),
 				State:       req.GetState(),
 			}
@@ -356,8 +359,13 @@ func (i *issueRepository) Create(ctx context.Context, req dto.IssuePayload) (*mo
 		return nil, errors.New("issue creation failed: no issue returned")
 	}
 
-	i.logger.WithField("issue_id", issue.ID).Info("Created new issue")
+	if updatedIssue {
+		i.logger.WithField("issue_id", issue.ID).Info("Existing issue has been updated")
+		// Reload with associations
+		return i.FindByID(ctx, issue.ID)
+	}
 
+	i.logger.WithField("issue_id", issue.ID).Info("Created new issue")
 	// Reload with associations
 	return i.FindByID(ctx, issue.ID)
 }
@@ -378,7 +386,7 @@ func (i *issueRepository) createNewIssueInTx(tx *gorm.DB, req dto.IssuePayload) 
 		state = models.IssueStateActive
 	}
 
-	resourceNamespace := req.GetScope().ResourceNamespace
+	resourceNamespace := req.GetScope().GetResourceNamespace()
 	if resourceNamespace == "" {
 		resourceNamespace = req.GetNamespace()
 	}
@@ -392,8 +400,8 @@ func (i *issueRepository) createNewIssueInTx(tx *gorm.DB, req dto.IssuePayload) 
 		DetectedAt:  now,
 		Namespace:   req.GetNamespace(),
 		Scope: models.IssueScope{
-			ResourceType:      req.GetScope().ResourceType,
-			ResourceName:      req.GetScope().ResourceName,
+			ResourceType:      req.GetScope().GetResourceType(),
+			ResourceName:      req.GetScope().GetResourceName(),
 			ResourceNamespace: resourceNamespace,
 		},
 	}
@@ -458,14 +466,26 @@ func (i *issueRepository) Update(ctx context.Context, id string, req dto.IssuePa
 //   - error: Database error or nil
 func (i *issueRepository) updateIssueInTx(tx *gorm.DB, existingIssue *models.Issue, req dto.IssuePayload) error {
 	// Prepare updates
-	updates := map[string]any{
-		"title":       req.GetTitle(),
-		"description": req.GetDescription(),
-		"severity":    req.GetSeverity(),
-		"issue_type":  req.GetIssueType(),
-		"namespace":   req.GetNamespace(),
-		"updated_at":  time.Now(),
+	updates := make(map[string]any)
+
+	if title := req.GetTitle(); title != "" {
+		updates["title"] = title
 	}
+	if desc := req.GetDescription(); desc != "" {
+		updates["description"] = desc
+	}
+	if severity := req.GetSeverity(); severity != "" {
+		updates["severity"] = severity
+	}
+	if issueType := req.GetIssueType(); issueType != "" {
+		updates["issue_type"] = issueType
+	}
+	if namespace := req.GetNamespace(); namespace != "" {
+		updates["namespace"] = namespace
+	}
+
+	// Always update the timestamp
+	updates["updated_at"] = time.Now()
 
 	if req.GetState() != "" {
 		updates["state"] = req.GetState()
@@ -490,8 +510,8 @@ func (i *issueRepository) updateIssueInTx(tx *gorm.DB, existingIssue *models.Iss
 		i.logger.WithField("issue_id", existingIssue.ID).Info("Updated links")
 	}
 
-	if scope := req.GetScope(); scope.ResourceNamespace != "" {
-		err := i.updateIssueScopeInTx(tx, existingIssue.ScopeID, scope)
+	if scope := req.GetScope(); scope.GetResourceNamespace() != "" {
+		err := i.updateIssueScopeInTx(tx, existingIssue.ScopeID, scope.AsOptional())
 
 		if err != nil {
 			i.logger.WithField("scopeID", existingIssue.ScopeID).Error("failed to update issue scope")
@@ -541,7 +561,7 @@ func (i *issueRepository) replaceIssueLinks(tx *gorm.DB, issueID string, links [
 //
 // Returns:
 //   - error: Database error or nil
-func (i *issueRepository) updateIssueScopeInTx(tx *gorm.DB, scopeID string, req dto.ScopeReqBody) error {
+func (i *issueRepository) updateIssueScopeInTx(tx *gorm.DB, scopeID string, req dto.ScopeReqBodyOptional) error {
 	err := tx.Model(&models.IssueScope{}).
 		Where("id = ?", scopeID).
 		Updates(req).Error
